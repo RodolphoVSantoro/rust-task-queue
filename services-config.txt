@@ -1,0 +1,3 @@
+test:..\test\test
+T2:py ..\simple_nmr_rndwlk\T2.py
+img:py ..\imgTest\test.py
