@@ -1,4 +1,3 @@
-use worker_queue::TaskQueue;
 use std::collections::HashMap;
 use std::error::Error;
 use std::process::Command;
@@ -6,12 +5,16 @@ use std::sync::Mutex;
 use std::sync::Arc;
 use std::thread;
 
+use worker_queue::TaskQueue;
+
+use crate::read_conf::read_conf;
+
 
 #[derive(Clone)]
 pub struct Task{
     simulation: String,
     args: Vec<String>,
-    result_arc: Arc<Mutex<String>>
+    result_arc: Arc<Mutex<Option<String>>>
 }
 
 struct NmrQueueData {
@@ -81,7 +84,8 @@ impl NmrQueueData {
 
             let result = self.run_task(command, &args)
                 .expect(&format!("Failed to run {simulation} with args {args:?}"));
-            let rl = result_lock.lock().expect("Failed to adquire lock for writing result");
+            let mut rl = result_lock.lock().expect("Failed to adquire lock for writing result");
+            *rl = Some(result);
             println!("{simulation} done");
             self.task_queue.task_done(work);
         }
@@ -114,16 +118,4 @@ impl NmrQueueData {
             );
         }
     }
-}
-
-pub fn read_conf(fname: &str) -> Result<HashMap<String, String>, Box<dyn Error>> {
-    let mut conf = HashMap::new();
-    let contents = std::fs::read_to_string(fname)?;
-    for line in contents.lines() {
-        let mut split = line.split(':');
-        let key = split.next().unwrap();
-        let value = split.next().unwrap();
-        conf.insert(key.to_string(), value.to_string());
-    }
-    Ok(conf)
 }

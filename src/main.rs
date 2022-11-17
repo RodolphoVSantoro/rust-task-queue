@@ -21,13 +21,9 @@ async fn main() -> std::io::Result<()> {
 
 use nmr_queue::NmrQueue;
 mod nmr_queue;
-
-fn a<T>(ab: T) -> String where T: AsRef<str>{
-    return ab.as_ref();
-}
+mod read_conf;
 
 fn main() {
     let mut queue = NmrQueue::new();
-    let ad = "bacsd";
-    let b = a(ad);
+    
 }
