@@ -41,7 +41,7 @@ impl<T> TaskQueue<T> where T: Clone{
         }
     }
 
-    pub fn get(&mut self) -> Work<T>{
+    pub fn get(&self) -> Work<T>{
         loop{
             let has_work = self.has_work.lock()
                 .expect("Failed to adquire lock to check if queue has work");
@@ -52,7 +52,7 @@ impl<T> TaskQueue<T> where T: Clone{
             }
             drop(has_work);
             drop(is_working);
-            thread::sleep(Duration::from_secs(1));
+            thread::sleep(Duration::from_secs(5));
         }
         let task_queue_lock = self.queue.lock();
         let task = task_queue_lock.expect("Failed adquire lock to get task")
@@ -62,14 +62,14 @@ impl<T> TaskQueue<T> where T: Clone{
         return Work::new(task, Arc::clone(&self.working));
     }
 
-    pub fn put(&mut self, task: T){
+    pub fn put(&self, task: T){
         let mut has_work = self.has_work.lock().expect("Failed to adquire lock to check if queue has work");
         let mut queue = self.queue.lock().expect("Failed to adquire lock to put task");
         queue.add(task).expect("Failed to add task to queue");
         *has_work = true;
     }
 
-    pub fn task_done(&mut self, work: Work<T>){
+    pub fn task_done(&self, work: Work<T>){
         let mut queue_lock = self.queue.lock().expect("Failed to adquire lock to remove task");
         queue_lock.remove().expect("Failed to remove task from queue");
         if queue_lock.size() == 0{
@@ -80,12 +80,11 @@ impl<T> TaskQueue<T> where T: Clone{
         *working = false;
     }
 
-    pub fn task_incomplete(&mut self, work: Work<T>){
+    pub fn task_incomplete(&self, work: Work<T>){
         let mut working = work.working.lock().expect("Failed to adquire lock to check if worker is working");
         *working = false;
     }
 }
-
     
 #[cfg(test)]
 mod tests {

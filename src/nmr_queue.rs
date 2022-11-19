@@ -9,33 +9,37 @@ use worker_queue::TaskQueue;
 
 use crate::read_conf::read_conf;
 
-
 #[derive(Clone)]
 pub struct Task{
     simulation: String,
     args: Vec<String>,
-    result_arc: Arc<Mutex<Option<String>>>
+    result_arc: Arc<Mutex<TaskQueue<String>>>
+}
+
+impl Task {
+    pub fn new(simulation: String, args: Vec<String>, result_arc: Arc<Mutex<TaskQueue<String>>>) -> Task{
+        Task{simulation, args, result_arc}
+    }
 }
 
 struct NmrQueueData {
-    conf_path: Option<String>,
-    simulation_paths: Option<HashMap<String,String>>,
+    conf_path: Arc<Mutex<Option<String>>>,
+    simulation_paths: Arc<Mutex<Option<HashMap<String,String>>>>,
     task_queue: TaskQueue<Task>,
-    conf_last_update: Option<u64>,
+    conf_last_update: Arc<Mutex<Option<u64>>>,
 }
 
 pub struct NmrQueue {
-    inner: Arc<Mutex<NmrQueueData>>,
+    inner: Arc<NmrQueueData>,
     thread_handle: Option<thread::JoinHandle<()>>,
 }
 
 impl NmrQueue {
-    pub fn new() -> NmrQueue{
-        let inner = Arc::new(Mutex::new(NmrQueueData::new(None)));
+    pub fn new(conf_path: Option<String>) -> NmrQueue{
+        let inner = Arc::new(NmrQueueData::new(conf_path));
         let inner_clone = inner.clone();
         let thread_handle = thread::spawn(move || {
-            let mut inner = inner_clone.lock().expect("Failed to create NmrQueueData");
-            inner.run();
+            inner_clone.run();
         });
         NmrQueue{
             inner,
@@ -47,15 +51,16 @@ impl NmrQueue {
         self.thread_handle.expect("Thread was not started").join().expect("Failed to join thread");
     }
     pub fn set_conf_path(&mut self, conf_path: String) {
-        self.inner.lock().expect("Failed to adquire lock on set conf").conf_path = Some(conf_path);
+        *self.inner.conf_path.lock().expect("Failed to adquire lock") = Some(conf_path);
     }
 
     pub fn put(&mut self, task: Task){
-        if self.inner.lock().expect("Failed to adquire lock on put").conf_path.is_none(){
+        let conf = self.inner.conf_path.lock().expect("Failed to adquire lock on put");
+        if conf.is_none(){
             panic!("No configuration file path set");
         }
         else{
-            self.inner.lock().expect("Failed to adquire lock").task_queue.put(task);
+            self.inner.task_queue.put(task);
         }
     }
 }
@@ -63,34 +68,38 @@ impl NmrQueue {
 impl NmrQueueData {
     pub fn new(conf_path: Option<String>) -> NmrQueueData{
         NmrQueueData {
-            conf_path,
-            simulation_paths: None,
+            conf_path: Arc::new(Mutex::new(conf_path)),
+            simulation_paths: Arc::new(Mutex::new(None)),
             task_queue: TaskQueue::<Task>::new(),
-            conf_last_update: None,
+            conf_last_update: Arc::new(Mutex::new(None)),
         }
     }
 
-    fn run(&mut self){
-        loop {
-            print!("waiting for simulation");
+    fn run(&self){
+        loop{
+            println!("waiting for simulation");
+            
             let work = self.task_queue.get();
-            let result_lock = work.get_task().result_arc;
             let simulation = work.get_task().simulation;
             let args = work.get_task().args;
+
             self.update_conf();
-            let simulation_paths = self.simulation_paths.clone().expect("Failed to load simulation paths");
+            let simulation_paths = self.simulation_paths.lock().expect("Failed to adquire lock").clone().expect("Failed to load simulation paths");
             let command = simulation_paths.get(&simulation).expect(&format!("Failed to get simulation {simulation}"));
             println!("simulating: {simulation}");
 
             let result = self.run_task(command, &args)
                 .expect(&format!("Failed to run {simulation} with args {args:?}"));
-            let mut rl = result_lock.lock().expect("Failed to adquire lock for writing result");
-            *rl = Some(result);
+            let res_queue = work.get_task().result_arc;
+            res_queue
+                .lock()
+                .expect("Failed to adquire lock for writing result")
+                .put(result);
             println!("{simulation} done");
             self.task_queue.task_done(work);
         }
     }
-    fn run_task(&mut self, command: &String, args: &Vec<String>) -> Result<String, Box<dyn Error>> {
+    fn run_task(&self, command: &String, args: &Vec<String>) -> Result<String, Box<dyn Error>> {
         let proc_handle = Command::new(command)
             .args(args)
             .spawn();
@@ -104,15 +113,16 @@ impl NmrQueueData {
     }
 
     fn was_updated(&self) -> bool {
-        false
+        true
         //todo("check if configuration file was updated");
     }
 
-    fn update_conf(&mut self) {
+    fn update_conf(&self) {
+        let conf = self.conf_path.lock().expect("Failed to adquire lock").clone().expect("configuration path not set");
         if self.was_updated(){
-            self.simulation_paths = Some(
+            *self.simulation_paths.lock().expect("Failed to adquire lock") = Some(
                 read_conf(
-                    self.conf_path.as_ref().unwrap().as_str()
+                    &conf
                 )
                 .expect("Error reading configuration file")
             );
