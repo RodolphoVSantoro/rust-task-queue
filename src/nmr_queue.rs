@@ -13,11 +13,11 @@ use crate::read_conf::read_conf;
 pub struct Task{
     simulation: String,
     args: Vec<String>,
-    result_arc: Arc<Mutex<TaskQueue<String>>>
+    result_arc: Arc<TaskQueue<String>>
 }
 
 impl Task {
-    pub fn new(simulation: String, args: Vec<String>, result_arc: Arc<Mutex<TaskQueue<String>>>) -> Task{
+    pub fn new(simulation: String, args: Vec<String>, result_arc: Arc<TaskQueue<String>>) -> Task{
         Task{simulation, args, result_arc}
     }
 }
@@ -91,25 +91,16 @@ impl NmrQueueData {
             let result = self.run_task(command, &args)
                 .expect(&format!("Failed to run {simulation} with args {args:?}"));
             let res_queue = work.get_task().result_arc;
-            res_queue
-                .lock()
-                .expect("Failed to adquire lock for writing result")
-                .put(result);
+            res_queue.put(result);
             println!("{simulation} done");
             self.task_queue.task_done(work);
         }
     }
     fn run_task(&self, command: &String, args: &Vec<String>) -> Result<String, Box<dyn Error>> {
-        let proc_handle = Command::new(command)
+        let output = Command::new(command)
             .args(args)
-            .spawn();
-        match proc_handle {
-            Ok(proc_handle) => {
-                let output = proc_handle.wait_with_output()?;
-                Ok(String::from_utf8(output.stdout)?)
-            },
-            Err(e) => Err(Box::new(e)),
-        }
+            .output()?;
+        Ok(String::from_utf8(output.stdout)?)
     }
 
     fn was_updated(&self) -> bool {
